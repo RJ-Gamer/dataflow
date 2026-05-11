@@ -2,7 +2,7 @@ import os
 import shutil
 import traceback
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -113,3 +113,70 @@ def list_documents(
         )
         for d in docs
     ]
+
+
+class IngestConfig(BaseModel):
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+
+
+@router.post("/{project_id}/ingest/experiment", response_model=DocumentResponse)
+def ingest_experiment(
+    project_id: str,
+    file: UploadFile = File(...),
+    chunk_size: int = Form(default=500),
+    chunk_overlap: int = Form(default=50),
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_project_by_api_key),
+):
+    if project.id != project_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    extension = file.filename.split(".")[-1].lower()
+    if extension not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+
+    file_path = os.path.join(
+        UPLOAD_DIR, f"{project_id}_exp_{chunk_size}_{file.filename}"
+    ).replace("\\", "/")
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    doc = Document(
+        project_id=project_id,
+        filename=f"[exp-{chunk_size}] {file.filename}",
+        file_type=extension,
+        is_processed=False,
+        chunk_count=0,
+    )
+    db.add(doc)
+    db.commit()
+
+    try:
+        result = ingest_document(
+            project_id=project_id,
+            file_path=file_path,
+            file_type=extension,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        doc.is_processed = True
+        doc.chunk_count = result["chunk_count"]
+        db.commit()
+        db.refresh(doc)
+
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+
+    return DocumentResponse(
+        id=doc.id,
+        filename=doc.filename,
+        file_type=doc.file_type,
+        chunk_count=doc.chunk_count,
+        is_processed=doc.is_processed,
+        created_at=str(doc.created_at),
+    )

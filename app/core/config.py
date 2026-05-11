@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     database_url: str
     chroma_persist_dir: str = "./chroma_db"
     mlflow_tracking_uri: str = "./mlflow_runs"
+    port: int = 8000
 
     class Config:
         env_file = ".env"
