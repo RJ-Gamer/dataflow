@@ -1,0 +1,1 @@
+﻿This is a test document for DocFlow. It contains information about API monitoring and uptime tracking. DocFlow helps developers expose their documentation as a queryable API endpoint. Users can upload PDF or text files and ask questions about them.
